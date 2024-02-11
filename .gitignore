@@ -1,0 +1,5 @@
+.DS_Store
+*.rfile
+*.dat
+*.[e,n,u]
+*sif

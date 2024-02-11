@@ -1,0 +1,163 @@
+Bootstrap: library
+From: ubuntu:latest
+
+%post
+    # Install dependencies
+    apt update && \
+       DEBIAN_FRONTEND='noninteractive' \
+       DEBCONF_NONINTERACTIVE_SEEN='true' \
+       apt install --yes \
+          build-essential \
+          cmake \
+          gfortran \
+          libblas-dev \
+          liblapack-dev \
+          libmpich-dev \
+          python3 \
+          git \
+          wget \
+          pkg-config \
+          python3-numpy \
+          libsqlite3-dev \
+          sqlite3 \
+          libproj-dev \
+          libhdf5-dev \
+          python3-h5py
+
+    SW4ROOT=/sw4_library
+    mkdir ${SW4ROOT}
+
+    # Build MPICH
+
+    MPI_VERSION="3.1.4" #"3.4.3"
+    MPI_CONFIGURE_OPTIONS="--enable-fast=all,O3 --prefix=/usr/lib64 FFLAGS=-fallow-argument-mismatch FCFLAGS=-fallow-argument-mismatch" #works with 3.1.4, and 4.0.x
+    #MPI_CONFIGURE_OPTIONS="--enable-fast=all,O3 --prefix=/usr/lib64 --with-device=ch4:ofi"
+    MPI_MAKE_OPTIONS="-j4"
+
+    mkdir -p /tmp/mpich-build \
+      && cd /tmp/mpich-build \
+      && wget http://www.mpich.org/static/downloads/${MPI_VERSION}/mpich-${MPI_VERSION}.tar.gz \
+      && tar xvzf mpich-${MPI_VERSION}.tar.gz \
+      && cd mpich-${MPI_VERSION}  \
+      && ./configure ${MPI_CONFIGURE_OPTIONS} \
+      && make ${MPI_MAKE_OPTIONS} \
+      && make install \
+      && ldconfig \
+      && cp -p /tmp/mpich-build/mpich-${MPI_VERSION}/examples/cpi /usr/bin/ \
+      && cd / \
+      && rm -rf /tmp/mpich-build
+
+    export PATH=/usr/lib64/bin:$PATH
+    export OMP_NUM_THREADS=1
+
+    #which mpicc 
+    # should return something reasonable (with your directory)
+    #ls
+    #mpiexec -n 2 ./examples/cpi
+
+
+
+
+    # Some uesful Linux utilities
+    apt-get update -qq \
+      && apt-get -y --no-install-recommends install patchelf strace ltrace \
+      && apt-get clean all \
+      && rm -r /var/lib/apt/lists/*
+
+
+
+    # Download and build proj
+    wget "https://download.osgeo.org/proj/proj-9.1.0.tar.gz"
+    tar xvf proj-9.1.0.tar.gz
+    cd proj-9.1.0
+    mkdir build
+    cd build
+    cmake -DBUILD_APPS=OFF -DCMAKE_INSTALL_PREFIX=${SW4ROOT} ..
+    make
+    make install
+    cd ../..
+
+    # Download ZFP
+    wget "https://github.com/LLNL/zfp/releases/download/1.0.0/zfp-1.0.0.tar.gz"
+    tar xvf zfp-1.0.0.tar.gz
+    cd zfp-1.0.0
+    mkdir build
+    cd build
+    cmake -DZFP_BIT_STREAM_WORD_SIZE=8 -DCMAKE_INSTALL_PREFIX=${SW4ROOT} ..
+    make
+    make install
+    cd ../..
+
+    # Download and install HDF5
+    wget "https://support.hdfgroup.org/ftp/HDF5/releases/hdf5-1.14/hdf5-1.14.0/src/hdf5-1.14.0.tar.gz"
+    tar xvf hdf5-1.14.0.tar.gz
+    cd hdf5-1.14.0
+    mkdir build
+    cd build
+    cmake -DHDF5_ENABLE_PARALLEL=ON -DCMAKE_INSTALL_PREFIX=${SW4ROOT} ..
+    make
+    make install
+    cd ../..
+
+    # Download and install H5Z-ZFP
+    git clone https://github.com/LLNL/H5Z-ZFP.git
+    cd H5Z-ZFP
+    ls
+    mkdir build
+    cd build
+    export HDF_DIR=${SW4ROOT}
+    export ZFP_DIR=${SW4ROOT}
+    cmake -DCMAKE_INSTALL_PREFIX=${SW4ROOT} ..
+    make
+    make install
+    cd ../..
+
+    # Download and build SW4
+    git clone https://github.com/geodynamics/sw4.git
+    cd sw4
+
+    # generate make.inc file
+    echo "proj = yes" >> configs/make.inc
+    echo "etree = no" >> configs/make.inc
+    echo "hdf5 = yes" >> configs/make.inc
+    echo "zfp = yes" >> configs/make.inc
+    echo "FC = gfortran" >> configs/make.inc
+    echo "CXX = mpicxx" >> configs/make.inc
+    echo "SW4ROOT = ${SW4ROOT}" >> configs/make.inc
+    echo "HDF5ROOT = ${SW4ROOT}" >> configs/make.inc
+    echo "ZFPROOT = ${SW4ROOT}" >> configs/make.inc
+    echo "H5ZROOT = ${SW4ROOT}" >> configs/make.inc
+    echo "EXTRA_LINK_FLAGS = -L/usr/lib64 -llapack -lblas -lgfortran" >> configs/make.inc
+
+    make
+    cd ..
+
+%post
+    # Install sw4 executable
+    scp -r sw4/optimize_mp/sw4 /usr/local/bin
+    chmod +x /usr/local/bin/sw4
+
+    # Run SW4 test_sw4.py file
+    cd /sw4/pytest
+    python3 test_sw4.py
+
+%environment
+    export PATH=$PATH:/sw4/optimize_mp
+    echo 'export PATH=/sw4/optimize_mp:$PATH' >> $SINGULARITY_ENVIRONMENT
+    export PATH=$PATH:/usr/local/bin
+
+    export LD_LIBRARY_PATH=/usr/lib64:$LD_LIBRARY_PATH
+    export LD_LIBRARY_PATH=/usr/lib64/lib:$LD_LIBRARY_PATH
+    export PATH=/usr/lib64/bin:$PATH
+
+    export SINGULARITYENV_LD_LIBRARY_PATH="/usr/lib64:\$LD_LIBRARY_PATH"
+
+    export OMP_NUM_THREADS=1
+
+%runscript
+    # Run the command specified on the command line, or sw4 if no command is specified
+    if [ -z "$1" ]; then
+        sw4
+    else
+        exec "$@"
+    fi

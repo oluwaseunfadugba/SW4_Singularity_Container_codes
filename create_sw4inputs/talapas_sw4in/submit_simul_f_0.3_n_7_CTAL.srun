@@ -1,0 +1,13 @@
+#!/bin/bash
+#SBATCH --partition=long          ### Partition
+#SBATCH --job-name=0.3_7_CTAL            ### Job Name
+#SBATCH --time=70:00:00             ### WallTime
+#SBATCH --nodes=7                  ### Number of Nodes
+#SBATCH --ntasks-per-node=28       ### Number of tasks (MPI processes)
+#SBATCH --account=waves            ### Account used for job submission
+#SBATCH --mem-per-cpu=4G 
+
+module load singularity
+
+mpirun -np $SLURM_NTASKS singularity run --home $(pwd) ../final_sw4_singuarity/sw4_2.01_cpu sw4 simul_f_0.3_n_7_CTAL.sw4input
+
